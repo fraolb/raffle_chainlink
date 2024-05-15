@@ -15,6 +15,11 @@ contract Raffle is VRFConsumerBaseV2 {
     error Raffle__NotEnoughETHSent();
     error Raffle__NotOpen();
     error Raffle__TransferFailed();
+    error Raffle__UpkeepNotNeeded(
+        uint256 currentBalance,
+        uint256 numPlayers,
+        uint256 raffleState
+    );
 
     enum RaffleState {
         OPEN,
@@ -38,6 +43,8 @@ contract Raffle is VRFConsumerBaseV2 {
 
     event EnteredRaffle(address indexed player);
     event PickedWinner(address indexed winner);
+    event WinnerPicked(address indexed player);
+    event RequestedRaffleWinner(uint256 indexed requestId);
 
     constructor(
         uint256 entranceFee,
@@ -57,27 +64,41 @@ contract Raffle is VRFConsumerBaseV2 {
         s_raffleState = RaffleState.OPEN;
     }
 
-    function enterRaffle() external payable {
-        //require(msg.value >= i_entranceFee, "Not enought ETH sent!");
-        if (msg.value < i_entranceFee) {
-            revert Raffle__NotEnoughETHSent();
-        }
-
-        if (s_raffleState != RaffleState.OPEN) {
-            revert Raffle__NotOpen();
-        }
-
-        s_players.push(payable(msg.sender));
-        emit EnteredRaffle(msg.sender);
+    /**
+     * @dev This is the function that the Chainlink Keeper nodes call
+     * they look for `upkeepNeeded` to return True.
+     * the following should be true for this to return true:
+     * 1. The time interval has passed between raffle runs.
+     * 2. The lottery is open.
+     * 3. The contract has ETH.
+     * 4. Implicity, your subscription is funded with LINK.
+     */
+    function checkUpkeep(
+        bytes memory /* checkData */
+    ) public view returns (bool upkeepNeeded, bytes memory /* performData */) {
+        bool isOpen = RaffleState.OPEN == s_raffleState;
+        bool timePassed = ((block.timestamp - s_lastTimeStamp) > i_interval);
+        bool hasPlayers = s_players.length > 0;
+        bool hasBalance = address(this).balance > 0;
+        upkeepNeeded = (timePassed && isOpen && hasBalance && hasPlayers);
+        return (upkeepNeeded, "0x0"); // can we comment this out?
     }
 
-    function pickWinner() public {
-        if (block.timestamp - s_lastTimeStamp < i_interval) {
-            revert();
+    /**
+     * @dev Once `checkUpkeep` is returning `true`, this function is called
+     * and it kicks off a Chainlink VRF call to get a random winner.
+     */
+    function performUpkeep(bytes calldata /* performData */) external {
+        (bool upkeepNeeded, ) = checkUpkeep("");
+        // require(upkeepNeeded, "Upkeep not needed");
+        if (!upkeepNeeded) {
+            revert Raffle__UpkeepNotNeeded(
+                address(this).balance,
+                s_players.length,
+                uint256(s_raffleState)
+            );
         }
-
         s_raffleState = RaffleState.CALCULATING;
-
         uint256 requestId = i_vrfCoordinator.requestRandomWords(
             i_gasLane,
             i_subscriptionId,
@@ -85,6 +106,8 @@ contract Raffle is VRFConsumerBaseV2 {
             i_callbackGasLimit,
             NUM_WORDS
         );
+        // Quiz... is this redundant?
+        emit RequestedRaffleWinner(requestId);
     }
 
     //CEI: Checks, Effects, Interactions
