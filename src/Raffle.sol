@@ -64,6 +64,16 @@ contract Raffle is VRFConsumerBaseV2 {
         s_raffleState = RaffleState.OPEN;
     }
 
+    function enterRaffle() external payable {
+        //require(msg.value >= i_entranceFee, "Not enought ETH sent!");
+        if (msg.value < i_entranceFee) {
+            revert Raffle__NotEnoughETHSent();
+        }
+
+        s_players.push(payable(msg.sender));
+        emit EnteredRaffle(msg.sender);
+    }
+
     /**
      * @dev This is the function that the Chainlink Keeper nodes call
      * they look for `upkeepNeeded` to return True.
@@ -132,11 +142,15 @@ contract Raffle is VRFConsumerBaseV2 {
     }
 
     //Getter Function
-    function getEntranceFee() public view returns (uint256) {
+    function getEntranceFee() external view returns (uint256) {
         return i_entranceFee;
     }
 
-    function getRaffleState() public view returns (RaffleState) {
+    function getRaffleState() external view returns (RaffleState) {
         return s_raffleState;
+    }
+
+    function getPlayer(uint256 indexOfPlayer) external view returns (address) {
+        return s_players[indexOfPlayer];
     }
 }
